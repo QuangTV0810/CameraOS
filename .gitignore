@@ -1,0 +1,14 @@
+.agents/
+.vscode/
+.codex/
+build/
+configs/
+core/
+docs/
+hal/vendors/
+rules/
+scripts/
+*.o
+*.a
+*.so
+*.swp
