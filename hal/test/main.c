@@ -12,7 +12,8 @@
 #error "Unsupported HAL vendor"
 #endif
 
-#define HAL_TEST_PIPELINE_COUNT 2U
+#define HAL_TEST_PIPELINE_COUNT   2U
+#define HAL_TEST_AUDIO_CHANNEL_ID 0U
 
 typedef struct __HalTestPipelineConfig HalTestPipelineConfig;
 struct __HalTestPipelineConfig {
@@ -23,6 +24,20 @@ struct __HalTestPipelineConfig {
     FILE* pOutputFile;
     CameraOSHalVideoInputConfig stViConfig;
     CameraOSHalVideoEncodeConfig stVencConfig;
+};
+
+typedef struct __HalTestAudioConfig HalTestAudioConfig;
+struct __HalTestAudioConfig {
+    uint32_t u32AiChnId;
+    uint32_t u32AencChnId;
+    bool bWriteRawToFile;
+    bool bWriteEncodeToFile;
+    const char* pRawOutputFilePath;
+    const char* pEncodeOutputFilePath;
+    FILE* pRawOutputFile;
+    FILE* pEncodeOutputFile;
+    CameraOSHalAudioInputConfig stAiConfig;
+    CameraOSHalAudioEncodeConfig stAencConfig;
 };
 
 static volatile sig_atomic_t gStop = 0;
@@ -38,13 +53,21 @@ int main(void)
     int retStatus = 0;
     CameraOSHalSystemConfig stSystemConfig = {0};
     CameraOSHalVideoEncodeFrame astFrame[HAL_TEST_PIPELINE_COUNT] = {0};
+    CameraOSHalAudioInputFrame stAudioRawFrame = {0};
+    CameraOSHalAudioEncodeFrame stAudioFrame = {0};
     HalTestPipelineConfig astPipeline[HAL_TEST_PIPELINE_COUNT] = {0};
+    HalTestAudioConfig stAudio = {0};
     const CameraOSHalOps* pOps = NULL;
     PCameraOSHalHandle pHandle = NULL;
     bool abViCreated[HAL_TEST_PIPELINE_COUNT] = {false};
     bool abVencCreated[HAL_TEST_PIPELINE_COUNT] = {false};
     bool abBound[HAL_TEST_PIPELINE_COUNT] = {false};
     bool abFrameAcquired[HAL_TEST_PIPELINE_COUNT] = {false};
+    bool bAiCreated = false;
+    bool bAencCreated = false;
+    bool bAudioBound = false;
+    bool bAudioRawFrameAcquired = false;
+    bool bAudioFrameAcquired = false;
     uint32_t i;
 
     ENTER();
@@ -97,6 +120,21 @@ int main(void)
     astPipeline[1].stVencConfig.enCodecType = HAL_VIDEO_CODEC_H264;
     astPipeline[1].stVencConfig.enRcMode = HAL_VIDEO_ENCODE_RC_MODE_H264_CBR;
 
+    stAudio.u32AiChnId = HAL_TEST_AUDIO_CHANNEL_ID;
+    stAudio.u32AencChnId = HAL_TEST_AUDIO_CHANNEL_ID;
+    stAudio.bWriteRawToFile = false;
+    stAudio.bWriteEncodeToFile = false;
+    stAudio.pRawOutputFilePath = "./audio_0.pcm";
+    stAudio.pEncodeOutputFilePath = "./audio_0.g711u";
+    stAudio.stAiConfig.u32SampleRate = 8000;
+    stAudio.stAiConfig.u32Channels = 1;
+    stAudio.stAiConfig.u32BitWidth = 16;
+    stAudio.stAencConfig.enCodecType = HAL_AUDIO_CODEC_G711U;
+    stAudio.stAencConfig.u32SampleRate = 8000;
+    stAudio.stAencConfig.u32Channels = 1;
+    stAudio.stAencConfig.u32BitWidth = 16;
+    stAudio.stAencConfig.u32BitRate = 64000;
+
 #if defined(CAMERAOS_HAL_VENDOR_RV1106)
     pOps = getRV1106HalDefaultImpl();
 #elif defined(CAMERAOS_HAL_VENDOR_RTS3917N)
@@ -116,6 +154,20 @@ int main(void)
                 retStatus = -1;
                 break;
             }
+        }
+    }
+    if (retStatus == 0 && stAudio.bWriteRawToFile) {
+        stAudio.pRawOutputFile = fopen(stAudio.pRawOutputFilePath, "wb");
+        if (stAudio.pRawOutputFile == NULL) {
+            fprintf(stderr, "failed to open output file: %s\n", stAudio.pRawOutputFilePath);
+            retStatus = -1;
+        }
+    }
+    if (retStatus == 0 && stAudio.bWriteEncodeToFile) {
+        stAudio.pEncodeOutputFile = fopen(stAudio.pEncodeOutputFilePath, "wb");
+        if (stAudio.pEncodeOutputFile == NULL) {
+            fprintf(stderr, "failed to open output file: %s\n", stAudio.pEncodeOutputFilePath);
+            retStatus = -1;
         }
     }
 
@@ -140,6 +192,25 @@ int main(void)
         }
     }
 
+    if (retStatus == 0) {
+        retStatus = createCameraOSHalAudioInputChannel(pHandle, stAudio.u32AiChnId, &stAudio.stAiConfig);
+        if (retStatus == 0) {
+            bAiCreated = true;
+        }
+    }
+    if (retStatus == 0) {
+        retStatus = createCameraOSHalAudioEncodeChannel(pHandle, stAudio.u32AencChnId, &stAudio.stAencConfig);
+        if (retStatus == 0) {
+            bAencCreated = true;
+        }
+    }
+    if (retStatus == 0) {
+        retStatus = bindCameraOSHalAudioInputToAudioEncode(pHandle, stAudio.u32AiChnId, stAudio.u32AencChnId);
+        if (retStatus == 0) {
+            bAudioBound = true;
+        }
+    }
+
     while (retStatus == 0 && !gStop) {
         for (i = 0; i < HAL_TEST_PIPELINE_COUNT && retStatus == 0; ++i) {
             memset(&astFrame[i], 0, sizeof(astFrame[i]));
@@ -149,7 +220,7 @@ int main(void)
             }
 
             abFrameAcquired[i] = true;
-            printf("[%u]: len=%u pts=%lld key=%d nalu=0x%02x data=%p\n", astPipeline[i].u32VencChnId, astFrame[i].length,
+            printf("[venc-%u]: len=%u pts=%lld key=%d nalu=0x%02x data=%p\n", astPipeline[i].u32VencChnId, astFrame[i].length,
                    (long long) astFrame[i].timestamp, astFrame[i].bKeyFrame ? 1 : 0, astFrame[i].u8NaluType, (const void*) astFrame[i].data);
             if (astPipeline[i].pOutputFile != NULL && astFrame[i].data != NULL && astFrame[i].length > 0U) {
                 if (fwrite(astFrame[i].data, 1, astFrame[i].length, astPipeline[i].pOutputFile) != astFrame[i].length) {
@@ -170,9 +241,82 @@ int main(void)
 
             abFrameAcquired[i] = false;
         }
+
+        if (retStatus != 0) {
+            break;
+        }
+
+        memset(&stAudioRawFrame, 0, sizeof(stAudioRawFrame));
+        retStatus = getCameraOSHalAudioInputFrame(pHandle, stAudio.u32AiChnId, &stAudioRawFrame, 100);
+        if (retStatus != 0) {
+            printf("failed to get audio input frame: %d\n", retStatus);
+            break;
+        }
+
+        bAudioRawFrameAcquired = true;
+        printf("[araw-%u]: len=%u pts=%lld rate=%u ch=%u width=%u codec=%d data=%p\n", stAudio.u32AiChnId, stAudioRawFrame.length,
+               (long long) stAudioRawFrame.timestamp, stAudioRawFrame.u32SampleRate, stAudioRawFrame.u32Channels, stAudioRawFrame.u32BitWidth,
+               (int) stAudioRawFrame.enCodecType, (const void*) stAudioRawFrame.data);
+        if (stAudio.pRawOutputFile != NULL && stAudioRawFrame.data != NULL && stAudioRawFrame.length > 0U) {
+            if (fwrite(stAudioRawFrame.data, 1, stAudioRawFrame.length, stAudio.pRawOutputFile) != stAudioRawFrame.length) {
+                fprintf(stderr, "failed to write output file: %s\n", stAudio.pRawOutputFilePath);
+                retStatus = -1;
+            } else {
+                fflush(stAudio.pRawOutputFile);
+            }
+        }
+        if (retStatus != 0) {
+            break;
+        }
+
+        retStatus = releaseCameraOSHalAudioInputFrame(pHandle, stAudio.u32AiChnId, &stAudioRawFrame);
+        if (retStatus != 0) {
+            break;
+        }
+
+        bAudioRawFrameAcquired = false;
+
+        memset(&stAudioFrame, 0, sizeof(stAudioFrame));
+        retStatus = getCameraOSHalAudioEncodeFrame(pHandle, stAudio.u32AencChnId, &stAudioFrame, 100);
+        if (retStatus != 0) {
+            printf("failed to get audio encode frame: %d\n", retStatus);
+            break;
+        }
+
+        bAudioFrameAcquired = true;
+        printf("[aenc-%u]: len=%u pts=%lld codec=%d data=%p\n", stAudio.u32AencChnId, stAudioFrame.length, (long long) stAudioFrame.timestamp,
+               (int) stAudioFrame.enCodecType, (const void*) stAudioFrame.data);
+        if (stAudio.pEncodeOutputFile != NULL && stAudioFrame.data != NULL && stAudioFrame.length > 0U) {
+            if (fwrite(stAudioFrame.data, 1, stAudioFrame.length, stAudio.pEncodeOutputFile) != stAudioFrame.length) {
+                fprintf(stderr, "failed to write output file: %s\n", stAudio.pEncodeOutputFilePath);
+                retStatus = -1;
+            } else {
+                fflush(stAudio.pEncodeOutputFile);
+            }
+        }
+        if (retStatus != 0) {
+            break;
+        }
+
+        retStatus = releaseCameraOSHalAudioEncodeFrame(pHandle, stAudio.u32AencChnId, &stAudioFrame);
+        if (retStatus != 0) {
+            break;
+        }
+
+        bAudioFrameAcquired = false;
     }
 
 cleanup:
+    if (bAudioRawFrameAcquired) {
+        releaseCameraOSHalAudioInputFrame(pHandle, stAudio.u32AiChnId, &stAudioRawFrame);
+        bAudioRawFrameAcquired = false;
+    }
+
+    if (bAudioFrameAcquired) {
+        releaseCameraOSHalAudioEncodeFrame(pHandle, stAudio.u32AencChnId, &stAudioFrame);
+        bAudioFrameAcquired = false;
+    }
+
     for (i = 0; i < HAL_TEST_PIPELINE_COUNT; ++i) {
         if (abFrameAcquired[i]) {
             releaseCameraOSHalVideoEncodeFrame(pHandle, astPipeline[i].u32VencChnId, &astFrame[i]);
@@ -196,6 +340,24 @@ cleanup:
             fclose(astPipeline[idx].pOutputFile);
             astPipeline[idx].pOutputFile = NULL;
         }
+    }
+
+    if (bAudioBound) {
+        unbindCameraOSHalAudioEncodeFromAudioInput(pHandle, stAudio.u32AiChnId, stAudio.u32AencChnId);
+    }
+    if (bAencCreated) {
+        destroyCameraOSHalAudioEncodeChannel(pHandle, stAudio.u32AencChnId);
+    }
+    if (bAiCreated) {
+        destroyCameraOSHalAudioInputChannel(pHandle, stAudio.u32AiChnId);
+    }
+    if (stAudio.pRawOutputFile != NULL) {
+        fclose(stAudio.pRawOutputFile);
+        stAudio.pRawOutputFile = NULL;
+    }
+    if (stAudio.pEncodeOutputFile != NULL) {
+        fclose(stAudio.pEncodeOutputFile);
+        stAudio.pEncodeOutputFile = NULL;
     }
 
     if (pHandle != NULL) {

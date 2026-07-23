@@ -8,6 +8,7 @@ docs/
 hal/vendors/
 rules/
 scripts/
+third_party/
 *.o
 *.a
 *.so

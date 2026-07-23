@@ -16,6 +16,9 @@ set(HAL_VENDOR_COMPILE_DEFINITIONS)
 if(CAMERAOS_HAL_VENDOR STREQUAL "rv1106")
     set(HAL_VENDOR_SRC
         vendors/rockchip/rv1106/src/rv1106_hal.c
+        vendors/rockchip/rv1106/src/rv1106_hal_system.c
+        vendors/rockchip/rv1106/src/rv1106_hal_video.c
+        vendors/rockchip/rv1106/src/rv1106_hal_isp.c
     )
     set(HAL_VENDOR_INCLUDE_DIR
         ${CMAKE_CURRENT_SOURCE_DIR}/vendors/rockchip/rv1106/include
@@ -33,11 +36,20 @@ if(CAMERAOS_HAL_VENDOR STREQUAL "rv1106")
 
     set(RV1106_SDK_ROOT /home/quangtv/Workspace/Rockchip/SDK/luckfox-pico)
     set(RV1106_MEDIA_INCLUDE ${RV1106_SDK_ROOT}/output/out/media_out/include)
+    set(RV1106_SAMPLE_COMMON_INCLUDE
+        ${RV1106_SDK_ROOT}/media/samples/example/common
+    )
+    set(RV1106_SAMPLE_ISP3_INCLUDE
+        ${RV1106_SDK_ROOT}/media/samples/example/common/isp3.x
+    )
     set(RV1106_RKAIQ_INCLUDE
         ${RV1106_SDK_ROOT}/media/isp/release_camera_engine_rkaiq_rv1126_arm-rockchip830-linux-gnueabihf/include
     )
     set(RV1106_RKAIQ_UAPI_INCLUDE
         ${RV1106_SDK_ROOT}/media/isp/release_camera_engine_rkaiq_rv1126_arm-rockchip830-linux-gnueabihf/include/rkaiq/uAPI
+    )
+    set(RV1106_RKAIQ_UAPI2_INCLUDE
+        ${RV1106_SDK_ROOT}/media/isp/release_camera_engine_rkaiq_rv1106_arm-rockchip830-linux-uclibcgnueabihf/include/rkaiq/uAPI2
     )
     set(RV1106_RKAIQ_INCLUDE_ROOT
         ${RV1106_SDK_ROOT}/media/isp/release_camera_engine_rkaiq_rv1126_arm-rockchip830-linux-gnueabihf/include/rkaiq
@@ -54,8 +66,11 @@ if(CAMERAOS_HAL_VENDOR STREQUAL "rv1106")
 
     list(APPEND HAL_VENDOR_INCLUDE_DIR
         ${RV1106_MEDIA_INCLUDE}
+        ${RV1106_SAMPLE_COMMON_INCLUDE}
+        ${RV1106_SAMPLE_ISP3_INCLUDE}
         ${RV1106_RKAIQ_INCLUDE}
         ${RV1106_RKAIQ_UAPI_INCLUDE}
+        ${RV1106_RKAIQ_UAPI2_INCLUDE}
         ${RV1106_RKAIQ_INCLUDE_ROOT}
         ${RV1106_RKAIQ_INCLUDE_COMMON}
         ${RV1106_RKAIQ_INCLUDE_XCORE}
@@ -64,6 +79,9 @@ if(CAMERAOS_HAL_VENDOR STREQUAL "rv1106")
 elseif(CAMERAOS_HAL_VENDOR STREQUAL "rts3917n")
     set(HAL_VENDOR_SRC
         vendors/realtek/rts3917n/rts3917n_hal.c
+        vendors/realtek/rts3917n/rts3917n_hal_system.c
+        vendors/realtek/rts3917n/rts3917n_hal_video.c
+        vendors/realtek/rts3917n/rts3917n_hal_audio.c
     )
     set(HAL_VENDOR_INCLUDE_DIR
         ${CMAKE_CURRENT_SOURCE_DIR}/vendors/realtek/rts3917n
@@ -75,6 +93,10 @@ elseif(CAMERAOS_HAL_VENDOR STREQUAL "rts3917n")
     set(HAL_VENDOR_LINK_LIBS
         rtstream
         rtsvideo
+        rtsaudio
+        asound
+        soxr
+        avutil
     )
     set(HAL_VENDOR_COMPILE_DEFINITIONS
         CAMERAOS_HAL_VENDOR_RTS3917N=1
@@ -84,7 +106,10 @@ else()
 endif()
 
 add_library(cameraos_hal
-    src/hal.c
+    src/hal_system.c
+    src/hal_video.c
+    src/hal_audio.c
+    src/hal_isp.c
     ${HAL_VENDOR_SRC}
     ../platform/PlatformUtils.c
 )
