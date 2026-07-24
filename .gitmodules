@@ -1,6 +1,0 @@
-[submodule "third_party/osal"]
-	path = third_party/osal
-	url = https://github.com/nasa/osal.git
-[submodule "third_party/libdatachannel"]
-	path = third_party/libdatachannel
-	url = https://github.com/paullouisageneau/libdatachannel.git
