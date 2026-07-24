@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define LOG_CLASS "media-service"
 #include "cameraos/services/media/media_service.h"
@@ -37,11 +38,17 @@ struct __CameraOSMediaServiceVideoRuntime {
     /** True after the video input channel is bound to the video encode channel. */
     bool bBound;
 
+    /** True after the OSD instance is created for this pipeline. */
+    bool bOsdCreated;
+
     /** True while the video worker task is running. */
     bool bWorkerRunning;
 
     /** Set to true to request the video worker task to stop. */
     bool bStopRequested;
+
+    /** Last second value used to refresh OSD date/time. */
+    time_t lastOsdUpdateSecond;
 
     /** OS task identifier of the video worker task. */
     osal_id_t taskId;
@@ -158,6 +165,7 @@ static int startCameraOSMediaServiceAudio(PCameraOSMediaServiceHandle pHandle);
 static int stopCameraOSMediaServiceAudio(PCameraOSMediaServiceHandle pHandle);
 static int startCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, uint32_t u32PipelineId);
 static int stopCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, uint32_t u32PipelineId);
+static int mediaServiceConfigureVideoOsd(PCameraOSMediaServiceHandle pHandle, uint32_t u32Slot);
 
 /******************************************************************************************
  * PUBLIC API
@@ -245,6 +253,10 @@ int destroyCameraOSMediaService(PCameraOSMediaServiceHandle pHandle)
     for (u32Index = 0; u32Index < pHandle->stVideoConfig.u32PipelineCount; ++u32Index) {
         if (pHandle->astVideoRuntime[u32Index].bCreated) {
             mediaServiceVideoDeleteTask(pHandle, u32Index);
+            if (pHandle->astVideoRuntime[u32Index].bOsdCreated) {
+                destroyCameraOSHalOsd(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Index]);
+                pHandle->astVideoRuntime[u32Index].bOsdCreated = false;
+            }
             if (pHandle->astVideoRuntime[u32Index].bBound) {
                 unbindCameraOSHalVideoEncodeFromeVideoInput(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Index],
                                                             pHandle->stVideoConfig.au32PipelineId[u32Index]);
@@ -490,12 +502,75 @@ static int mediaServiceHalSystemConfig(PCameraOSHalSystemConfig pSystemConfig)
     return STATUS_SUCCESS;
 }
 
+static int mediaServiceConfigureVideoOsd(PCameraOSMediaServiceHandle pHandle, uint32_t u32Slot)
+{
+    uint32_t u32PipelineId;
+    int s32Ret;
+
+    if (pHandle == NULL || u32Slot >= pHandle->stVideoConfig.u32PipelineCount) {
+        return STATUS_INVALID_ARG;
+    }
+
+    if (!pHandle->stVideoConfig.abEnableOsd[u32Slot]) {
+        return STATUS_SUCCESS;
+    }
+
+    u32PipelineId = pHandle->stVideoConfig.au32PipelineId[u32Slot];
+    s32Ret = createCameraOSHalOsd(pHandle->pCameraOSHalHandle, u32PipelineId);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    pHandle->astVideoRuntime[u32Slot].bOsdCreated = true;
+
+    s32Ret = setCameraOSHalOsdDateTimeEnable(pHandle->pCameraOSHalHandle, u32PipelineId, pHandle->stVideoConfig.abEnableOsdDateTime[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdTitleEnable(pHandle->pCameraOSHalHandle, u32PipelineId, pHandle->stVideoConfig.abEnableOsdTitle[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdDateFormat(pHandle->pCameraOSHalHandle, u32PipelineId, pHandle->stVideoConfig.aenOsdDateFormat[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdTitle(pHandle->pCameraOSHalHandle, u32PipelineId, &pHandle->stVideoConfig.astOsdTitleConfig[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdBlockPosition(pHandle->pCameraOSHalHandle, u32PipelineId, HAL_OSD_BLOCK_ID_TIME,
+                                            &pHandle->stVideoConfig.astOsdTimePosition[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdBlockPosition(pHandle->pCameraOSHalHandle, u32PipelineId, HAL_OSD_BLOCK_ID_DATE,
+                                            &pHandle->stVideoConfig.astOsdDatePosition[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    s32Ret = setCameraOSHalOsdBlockPosition(pHandle->pCameraOSHalHandle, u32PipelineId, HAL_OSD_BLOCK_ID_TITLE,
+                                            &pHandle->stVideoConfig.astOsdTitlePosition[u32Slot]);
+    if (s32Ret != HAL_ERR_NONE) {
+        return STATUS_INTERNAL_ERROR;
+    }
+
+    return STATUS_SUCCESS;
+}
+
 static void mediaServiceVideoWorkerLoop(uint32_t u32Slot)
 {
     int32_t s32Ret = STATUS_SUCCESS;
     CameraOSHalVideoInputFrame stRawFrame;
     CameraOSHalVideoEncodeFrame stEncodeFrame;
     CameraOSMediaServiceVideoRuntime* pRuntime = NULL;
+    time_t nowSecond;
 
     if (u32Slot >= gCameraOSMediaServiceHandle->stVideoConfig.u32PipelineCount) {
         DLOGE("Invalid video channel %d", u32Slot);
@@ -509,6 +584,16 @@ static void mediaServiceVideoWorkerLoop(uint32_t u32Slot)
     while (pRuntime->bStopRequested == false) {
         if (pRuntime->bStopRequested) {
             break;
+        }
+
+        if (gCameraOSMediaServiceHandle->stVideoConfig.abEnableOsd[u32Slot] &&
+            gCameraOSMediaServiceHandle->stVideoConfig.abEnableOsdDateTime[u32Slot]) {
+            nowSecond = time(NULL);
+            if (nowSecond != pRuntime->lastOsdUpdateSecond) {
+                pRuntime->lastOsdUpdateSecond = nowSecond;
+                (void) setCameraOSHalOsdDateTimeEnable(gCameraOSMediaServiceHandle->pCameraOSHalHandle,
+                                                       gCameraOSMediaServiceHandle->stVideoConfig.au32PipelineId[u32Slot], true);
+            }
         }
 
         /** Get video input frame and dispatch frame to application */
@@ -1022,8 +1107,28 @@ static int startCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, u
     }
     pRuntime->bBound = true;
 
+    s32Ret = mediaServiceConfigureVideoOsd(pHandle, u32Slot);
+    if (s32Ret != STATUS_SUCCESS) {
+        if (pRuntime->bOsdCreated) {
+            destroyCameraOSHalOsd(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+            pRuntime->bOsdCreated = false;
+        }
+        unbindCameraOSHalVideoEncodeFromeVideoInput(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot],
+                                                    pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+        destroyCameraOSHalVideoEncodeChannel(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+        destroyCameraOSHalVideoInputChannel(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+        pRuntime->bBound = false;
+        pRuntime->bCreated = false;
+        DLOGE("Configure video osd %d failed", u32PipelineId);
+        return s32Ret;
+    }
+
     s32Ret = mediaServiceVideoCreateTask(pHandle, u32Slot);
     if (s32Ret != STATUS_SUCCESS) {
+        if (pRuntime->bOsdCreated) {
+            destroyCameraOSHalOsd(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+            pRuntime->bOsdCreated = false;
+        }
         unbindCameraOSHalVideoEncodeFromeVideoInput(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot],
                                                     pHandle->stVideoConfig.au32PipelineId[u32Slot]);
         destroyCameraOSHalVideoEncodeChannel(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
@@ -1035,6 +1140,7 @@ static int startCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, u
     }
 
     pRuntime->bStopRequested = false;
+    pRuntime->lastOsdUpdateSecond = 0;
     LEAVE();
     return STATUS_SUCCESS;
 }
@@ -1070,6 +1176,10 @@ static int stopCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, ui
     }
 
     mediaServiceVideoDeleteTask(pHandle, u32Slot);
+    if (pHandle->astVideoRuntime[u32Slot].bOsdCreated) {
+        destroyCameraOSHalOsd(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
+        pHandle->astVideoRuntime[u32Slot].bOsdCreated = false;
+    }
     if (pHandle->astVideoRuntime[u32Slot].bBound) {
         unbindCameraOSHalVideoEncodeFromeVideoInput(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot],
                                                     pHandle->stVideoConfig.au32PipelineId[u32Slot]);
@@ -1078,6 +1188,7 @@ static int stopCameraOSMediaServiceVideo(PCameraOSMediaServiceHandle pHandle, ui
     destroyCameraOSHalVideoEncodeChannel(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
     destroyCameraOSHalVideoInputChannel(pHandle->pCameraOSHalHandle, pHandle->stVideoConfig.au32PipelineId[u32Slot]);
     pHandle->astVideoRuntime[u32Slot].bCreated = false;
+    pHandle->astVideoRuntime[u32Slot].lastOsdUpdateSecond = 0;
 
     LEAVE();
     return STATUS_SUCCESS;

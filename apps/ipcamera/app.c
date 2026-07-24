@@ -15,6 +15,9 @@ static volatile sig_atomic_t gStop = 0;
 static PCameraOSMediaServiceHandle gPMediaService = NULL;
 static CameraOSMediaServiceConfig gMediaServiceConfig = {0};
 static bool gAbServiceMediaStarted[IPCAMERA_PIPELINE_COUNT] = {false};
+static bool gBEnableDebugDump = false;
+static FILE* gApVideoDumpFile[IPCAMERA_PIPELINE_COUNT] = {NULL};
+static FILE* gPAudioDumpFile = NULL;
 
 static void signalHandler(int sig)
 {
@@ -24,10 +27,18 @@ static void signalHandler(int sig)
 
 static int onVideoEncodeFrame(PCCameraOSMediaServiceEncodeFrameInfo pFrameInfo, void* pUserData)
 {
+    uint32_t u32Slot;
+
     (void) pUserData;
 
     if (pFrameInfo == NULL || pFrameInfo->pFrame == NULL) {
         return STATUS_INVALID_ARG;
+    }
+
+    u32Slot = pFrameInfo->u32PipelineId;
+    if (u32Slot < IPCAMERA_PIPELINE_COUNT && gApVideoDumpFile[u32Slot] != NULL) {
+        fwrite(pFrameInfo->pFrame->data, 1U, pFrameInfo->pFrame->length, gApVideoDumpFile[u32Slot]);
+        fflush(gApVideoDumpFile[u32Slot]);
     }
 
     printf("[venc=%u] len=%u pts=%lld key=%d nalu=0x%02x data=%p\n", pFrameInfo->u32VencChnId, pFrameInfo->pFrame->length,
@@ -43,6 +54,11 @@ static int onAudioEncodeFrame(PCCameraOSMediaServiceAudioEncodeFrameInfo pFrameI
 
     if (pFrameInfo == NULL || pFrameInfo->pFrame == NULL) {
         return STATUS_INVALID_ARG;
+    }
+
+    if (gPAudioDumpFile != NULL) {
+        fwrite(pFrameInfo->pFrame->data, 1U, pFrameInfo->pFrame->length, gPAudioDumpFile);
+        fflush(gPAudioDumpFile);
     }
 
     printf("[aenc=%u] len=%u pts=%lld codec=%d data=%p\n", pFrameInfo->u32AencChnId, pFrameInfo->pFrame->length,
@@ -115,8 +131,20 @@ static void loadDefaultConfig(void)
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].u32BitRate = 1024U * 1024U;
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enRotation = HAL_VIDEO_ROTATION_0;
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enMirror = HAL_VIDEO_MIRROR_NONE;
-    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enCodecType = HAL_VIDEO_CODEC_H264;
-    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enRcMode = HAL_VIDEO_ENCODE_RC_MODE_H264_CBR;
+    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enCodecType = HAL_VIDEO_CODEC_H265;
+    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[0].enRcMode = HAL_VIDEO_ENCODE_RC_MODE_H265_CBR;
+    gMediaServiceConfig.stVideoConfig.abEnableOsd[0] = true;
+    gMediaServiceConfig.stVideoConfig.abEnableOsdDateTime[0] = true;
+    gMediaServiceConfig.stVideoConfig.abEnableOsdTitle[0] = true;
+    gMediaServiceConfig.stVideoConfig.aenOsdDateFormat[0] = HAL_OSD_DATE_FORMAT_YYYY_MM_DD;
+    SNPRINTF(gMediaServiceConfig.stVideoConfig.astOsdTitleConfig[0].acTitle, sizeof(gMediaServiceConfig.stVideoConfig.astOsdTitleConfig[0].acTitle),
+             "CameraOS");
+    gMediaServiceConfig.stVideoConfig.astOsdTimePosition[0].u32X = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdTimePosition[0].u32Y = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdDatePosition[0].u32X = 170U;
+    gMediaServiceConfig.stVideoConfig.astOsdDatePosition[0].u32Y = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdTitlePosition[0].u32X = 340U;
+    gMediaServiceConfig.stVideoConfig.astOsdTitlePosition[0].u32Y = 0U;
 
     gMediaServiceConfig.stVideoConfig.au32PipelineId[1] = 1;
     gMediaServiceConfig.stVideoConfig.aenPipelineType[1] = MEDIA_PIPELINE_TYPE_SUB;
@@ -136,8 +164,20 @@ static void loadDefaultConfig(void)
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].u32BitRate = 512U * 1024U;
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enRotation = HAL_VIDEO_ROTATION_0;
     gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enMirror = HAL_VIDEO_MIRROR_NONE;
-    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enCodecType = HAL_VIDEO_CODEC_H264;
-    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enRcMode = HAL_VIDEO_ENCODE_RC_MODE_H264_CBR;
+    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enCodecType = HAL_VIDEO_CODEC_H265;
+    gMediaServiceConfig.stVideoConfig.astVideoEncodeConfig[1].enRcMode = HAL_VIDEO_ENCODE_RC_MODE_H265_CBR;
+    gMediaServiceConfig.stVideoConfig.abEnableOsd[1] = true;
+    gMediaServiceConfig.stVideoConfig.abEnableOsdDateTime[1] = true;
+    gMediaServiceConfig.stVideoConfig.abEnableOsdTitle[1] = true;
+    gMediaServiceConfig.stVideoConfig.aenOsdDateFormat[1] = HAL_OSD_DATE_FORMAT_YYYY_MM_DD;
+    SNPRINTF(gMediaServiceConfig.stVideoConfig.astOsdTitleConfig[1].acTitle, sizeof(gMediaServiceConfig.stVideoConfig.astOsdTitleConfig[1].acTitle),
+             "CameraOS");
+    gMediaServiceConfig.stVideoConfig.astOsdTimePosition[1].u32X = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdTimePosition[1].u32Y = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdDatePosition[1].u32X = 170U;
+    gMediaServiceConfig.stVideoConfig.astOsdDatePosition[1].u32Y = 0U;
+    gMediaServiceConfig.stVideoConfig.astOsdTitlePosition[1].u32X = 340U;
+    gMediaServiceConfig.stVideoConfig.astOsdTitlePosition[1].u32Y = 0U;
 }
 
 int initApp(void)
@@ -152,11 +192,32 @@ int initApp(void)
     gStop = 0;
     for (u32Index = 0U; u32Index < IPCAMERA_PIPELINE_COUNT; ++u32Index) {
         gAbServiceMediaStarted[u32Index] = false;
+        gApVideoDumpFile[u32Index] = NULL;
     }
+    gPAudioDumpFile = NULL;
     gPMediaService = NULL;
     gMediaServiceConfig = (CameraOSMediaServiceConfig) {0};
 
     loadDefaultConfig();
+
+    if (gBEnableDebugDump) {
+        gApVideoDumpFile[0] = fopen("main.h265", "wb");
+        if (gApVideoDumpFile[0] == NULL) {
+            return STATUS_OPEN_FILE_FAILED;
+        }
+
+        gApVideoDumpFile[1] = fopen("sub.h265", "wb");
+        if (gApVideoDumpFile[1] == NULL) {
+            deinitApp();
+            return STATUS_OPEN_FILE_FAILED;
+        }
+
+        gPAudioDumpFile = fopen("audio.g711", "wb");
+        if (gPAudioDumpFile == NULL) {
+            deinitApp();
+            return STATUS_OPEN_FILE_FAILED;
+        }
+    }
 
     s32Ret = createCameraOSMediaService(&gMediaServiceConfig, &gPMediaService);
     if (s32Ret != STATUS_SUCCESS) {
@@ -211,6 +272,18 @@ void deinitApp(void)
         unregisterCameraOSMediaServiceSink(gPMediaService, "stdout-encoded");
         destroyCameraOSMediaService(gPMediaService);
         gPMediaService = NULL;
+    }
+
+    if (gPAudioDumpFile != NULL) {
+        fclose(gPAudioDumpFile);
+        gPAudioDumpFile = NULL;
+    }
+
+    for (u32Index = 0U; u32Index < IPCAMERA_PIPELINE_COUNT; ++u32Index) {
+        if (gApVideoDumpFile[u32Index] != NULL) {
+            fclose(gApVideoDumpFile[u32Index]);
+            gApVideoDumpFile[u32Index] = NULL;
+        }
     }
 }
 

@@ -53,6 +53,14 @@ struct __CameraOSMediaServiceVideoConfig {
     bool abEnableVideoEncodeFrame[CAMERAOS_MEDIA_MAX_PIPELINES];
     CameraOSHalVideoInputConfig astVideoInputConfig[CAMERAOS_MEDIA_MAX_PIPELINES];
     CameraOSHalVideoEncodeConfig astVideoEncodeConfig[CAMERAOS_MEDIA_MAX_PIPELINES];
+    bool abEnableOsd[CAMERAOS_MEDIA_MAX_PIPELINES];
+    bool abEnableOsdDateTime[CAMERAOS_MEDIA_MAX_PIPELINES];
+    bool abEnableOsdTitle[CAMERAOS_MEDIA_MAX_PIPELINES];
+    HAL_OSD_DATE_FORMAT_E aenOsdDateFormat[CAMERAOS_MEDIA_MAX_PIPELINES];
+    CameraOSHalOsdTitleConfig astOsdTitleConfig[CAMERAOS_MEDIA_MAX_PIPELINES];
+    CameraOSHalOsdPoint astOsdTimePosition[CAMERAOS_MEDIA_MAX_PIPELINES];
+    CameraOSHalOsdPoint astOsdDatePosition[CAMERAOS_MEDIA_MAX_PIPELINES];
+    CameraOSHalOsdPoint astOsdTitlePosition[CAMERAOS_MEDIA_MAX_PIPELINES];
 };
 typedef struct __CameraOSMediaServiceVideoConfig* PCameraOSMediaServiceVideoConfig;
 

@@ -11,6 +11,7 @@ extern "C" {
 #include "cameraos/hal/hal_system.h"
 #include "cameraos/hal/hal_video.h"
 #include "cameraos/hal/hal_audio.h"
+#include "cameraos/hal/hal_osd.h"
 #include "cameraos/hal/hal_isp.h"
 
 struct __CameraOSHalOps {
@@ -29,6 +30,14 @@ struct __CameraOSHalOps {
 
     int (*bindVideoInputToVideoEncode)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, uint32_t u32VencChnId);
     int (*unbindVideoEncodeFromVideoInput)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, uint32_t u32VencChnId);
+
+    int (*createOsd)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId);
+    int (*destroyOsd)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId);
+    int (*setOsdDateTimeEnable)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, bool bEnable);
+    int (*setOsdTitleEnable)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, bool bEnable);
+    int (*setOsdTitle)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, PCameraOSHalOsdTitleConfig pConfig);
+    int (*setOsdDateFormat)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, HAL_OSD_DATE_FORMAT_E enFormat);
+    int (*setOsdBlockPosition)(PCameraOSHalHandle pHandle, uint32_t u32ViChnId, HAL_OSD_BLOCK_ID_E enBlockId, PCameraOSHalOsdPoint pPoint);
 
     int (*createAudioInputChannel)(PCameraOSHalHandle pHandle, uint32_t u32AiChnId, PCameraOSHalAudioInputConfig pCfg);
     int (*destroyAudioInputChannel)(PCameraOSHalHandle pHandle, uint32_t u32AiChnId);

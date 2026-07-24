@@ -82,10 +82,12 @@ elseif(CAMERAOS_HAL_VENDOR STREQUAL "rts3917n")
         vendors/realtek/rts3917n/rts3917n_hal_system.c
         vendors/realtek/rts3917n/rts3917n_hal_video.c
         vendors/realtek/rts3917n/rts3917n_hal_audio.c
+        vendors/realtek/rts3917n/rts3917n_hal_osd.c
     )
     set(HAL_VENDOR_INCLUDE_DIR
         ${CMAKE_CURRENT_SOURCE_DIR}/vendors/realtek/rts3917n
         /home/quangtv/Workspace/IPCam/Source/IP_Cam/out/rts3917n/staging/usr/include
+        /home/quangtv/Workspace/IPCam/Source/IP_Cam/out/rts3917n/staging/usr/include/freetype2
     )
     set(HAL_VENDOR_LINK_DIRS
         /home/quangtv/Workspace/IPCam/Source/IP_Cam/out/rts3917n/staging/usr/lib
@@ -97,6 +99,8 @@ elseif(CAMERAOS_HAL_VENDOR STREQUAL "rts3917n")
         asound
         soxr
         avutil
+        freetype
+        z
     )
     set(HAL_VENDOR_COMPILE_DEFINITIONS
         CAMERAOS_HAL_VENDOR_RTS3917N=1
@@ -109,6 +113,7 @@ add_library(cameraos_hal
     src/hal_system.c
     src/hal_video.c
     src/hal_audio.c
+    src/hal_osd.c
     src/hal_isp.c
     ${HAL_VENDOR_SRC}
     ../platform/PlatformUtils.c
